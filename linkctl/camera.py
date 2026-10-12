@@ -407,9 +407,9 @@ class LinkCamera:
         """
         self.xu_write(SEL_PTZ_RELATIVE, bytes(4))
         time.sleep(0.2)
-        self._sync_setpoints()
+        self.sync_setpoints()
 
-    def _sync_setpoints(self, zoom=False):
+    def sync_setpoints(self, zoom=False):
         """Write the gimbal's actual position back as the V4L2 setpoint."""
         tilt, pan = self.ptz_raw()
         self.set_pan(pan / ARCSEC_PER_DEGREE)
@@ -713,8 +713,12 @@ class LinkCamera:
         """Move to an on-camera preset and wait for the gimbal to arrive.
 
         Recalling does not update the V4L2 setpoints, so they are synced afterwards.
+        With settle=0 return at once; the caller must then call sync_setpoints(zoom=True)
+        once the gimbal has stopped.
         """
         self._camera_preset_write(SEL_PRESET_RECALL, slot)
+        if not settle:
+            return
         deadline = time.monotonic() + settle
         last = None
         while time.monotonic() < deadline:
@@ -723,7 +727,7 @@ class LinkCamera:
             if now == last:
                 break
             last = now
-        self._sync_setpoints(zoom=True)
+        self.sync_setpoints(zoom=True)
 
     def list_presets(self):
         return self._load_presets()
