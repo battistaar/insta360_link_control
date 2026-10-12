@@ -175,7 +175,11 @@ def cmd_mode(args, cam):
     if args.name is None:
         print(cam.get_mode())
     else:
-        print(cam.set_mode(args.name))
+        active = cam.set_mode(args.name, confirm=True)
+        print(active)
+        if active != args.name:
+            print(f"linkctl: the camera did not switch to {args.name}", file=sys.stderr)
+            return 1
     return 0
 
 
