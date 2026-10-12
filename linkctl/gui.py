@@ -376,6 +376,26 @@ class ControlPanel(ttk.Frame):
                  "pan, tilt and zoom into that slot.",
             justify="left",
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        store = ttk.Frame(presets)
+        store.grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ttk.Label(store, text="Store in").pack(side="left")
+        self.preset_store_var = tk.StringVar(value="computer")
+        ttk.Radiobutton(
+            store, text="This computer", value="computer", variable=self.preset_store_var,
+            command=self._refresh_presets,
+        ).pack(side="left", padx=(8, 0))
+        camera_store = ttk.Radiobutton(
+            store, text="Camera", value="camera", variable=self.preset_store_var,
+            command=self._refresh_presets,
+        )
+        camera_store.pack(side="left", padx=(8, 0))
+        if not (self.cam.has_extension_unit and self.cam.camera_preset_slots()):
+            camera_store.state(["disabled"])
+        ttk.Label(
+            presets, foreground="#666", justify="left",
+            text="Camera presets stay with the camera on any computer, but it\n"
+                 "does not report what a slot holds.",
+        ).grid(row=8, column=0, columnspan=2, sticky="w", pady=(4, 0))
         self.preset_buttons = {}
         for slot in range(1, 7):
             button = ttk.Button(
@@ -483,6 +503,10 @@ class ControlPanel(ttk.Frame):
             self._suppress = False
 
     def _refresh_presets(self):
+        if self.preset_store_var.get() == "camera":
+            for slot, button in self.preset_buttons.items():
+                button.configure(text=f"{slot}: camera slot {slot}")
+            return
         saved = self.cam.list_presets()
         for slot, button in self.preset_buttons.items():
             preset = saved.get(str(slot))
@@ -760,14 +784,27 @@ class ControlPanel(ttk.Frame):
             self.say(f"{name} failed: {exc}")
 
     def on_preset_save(self, slot):
+        on_camera = self.preset_store_var.get() == "camera"
         try:
-            self.cam.save_preset(slot)
+            if on_camera:
+                self.cam.save_camera_preset(slot)
+            else:
+                self.cam.save_preset(slot)
             self._refresh_presets()
-            self.say(f"Saved preset {slot}")
-        except OSError as exc:
+            self.say(f"Saved preset {slot} {'in the camera' if on_camera else 'on this computer'}")
+        except (OSError, ValueError) as exc:
             self.say(f"Save failed: {exc}")
 
     def on_preset_recall(self, slot):
+        if self.preset_store_var.get() == "camera":
+            try:
+                self.cam.recall_camera_preset(slot, settle=0)
+            except (OSError, ValueError) as exc:
+                self.say(f"Recall failed: {exc}")
+                return
+            self.say(f"Moving to camera preset {slot}")
+            self.after(300, lambda: self._settle_camera_preset(slot, None, 16))
+            return
         try:
             self.cam.recall_preset(slot)
             self._suppress = True
@@ -776,6 +813,22 @@ class ControlPanel(ttk.Frame):
             self.say(f"Recalled preset {slot}")
         except (OSError, ValueError) as exc:
             self.say(str(exc))
+
+    def _settle_camera_preset(self, slot, last, tries):
+        """Poll until the gimbal stops, then sync the setpoints and the zoom slider."""
+        try:
+            now = self.cam.ptz_raw()
+            if now != last and tries > 0:
+                self.after(300, lambda: self._settle_camera_preset(slot, now, tries - 1))
+                return
+            self.cam.sync_setpoints(zoom=True)
+            self._suppress = True
+            self.zoom_scale.set(self.cam.get_zoom())
+            self.zoom_label.configure(text=f"{self.cam.get_zoom():.2f}x")
+            self._suppress = False
+            self.say(f"Recalled camera preset {slot}")
+        except OSError as exc:
+            self.say(f"Recall failed: {exc}")
 
     def restore_defaults(self):
         for cid in list(self.sliders):
