@@ -810,12 +810,14 @@ class ControlPanel(ttk.Frame):
     def on_preset_recall(self, slot):
         if self.preset_store_var.get() == "camera":
             try:
+                start = self.cam.ptz_raw()
                 self.cam.recall_camera_preset(slot, settle=0)
             except (OSError, ValueError) as exc:
                 self.say(f"Recall failed: {exc}")
                 return
             self.say(f"Moving to camera preset {slot}")
-            self.after(300, lambda: self._settle_camera_preset(slot, None, 16))
+            began = time.monotonic()
+            self.after(300, lambda: self._settle_camera_preset(slot, start, None, began))
             return
         try:
             self.cam.recall_preset(slot)
@@ -826,12 +828,13 @@ class ControlPanel(ttk.Frame):
         except (OSError, ValueError) as exc:
             self.say(str(exc))
 
-    def _settle_camera_preset(self, slot, last, tries):
+    def _settle_camera_preset(self, slot, start, last, began):
         """Poll until the gimbal stops, then sync the setpoints and the zoom slider."""
         try:
             now = self.cam.ptz_raw()
-            if now != last and tries > 0:
-                self.after(300, lambda: self._settle_camera_preset(slot, now, tries - 1))
+            elapsed = time.monotonic() - began
+            if not self.cam.preset_move_done(start, last, now, elapsed) and elapsed < 5:
+                self.after(300, lambda: self._settle_camera_preset(slot, start, now, began))
                 return
             self.cam.sync_setpoints(zoom=True)
             self._suppress = True
