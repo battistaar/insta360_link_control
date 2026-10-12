@@ -587,6 +587,18 @@ class ControlPanel(ttk.Frame):
             self.toggle_preview()
         self.say(f"Camera reconnected on {cam.node}")
 
+    def _refresh_mode(self):
+        if not self.cam.has_extension_unit:
+            return
+        try:
+            mode = self.cam.get_mode()
+        except OSError:
+            return
+        if mode in MODES:
+            self._suppress = True
+            self.mode_var.set(mode)
+            self._suppress = False
+
     # ---------- handlers ----------
 
     # Speed of continuous motion while a pad button is held, by step size.
@@ -864,6 +876,8 @@ class ControlPanel(ttk.Frame):
                 return
             self.canvas.itemconfigure(self.placeholder, text="")
             self.say("Preview on -- the camera is now busy; turn it off before a call")
+            # Some models only report the active mode while video streams.
+            self.after(2000, self._refresh_mode)
             self._pump_preview()
         else:
             if self.preview:
