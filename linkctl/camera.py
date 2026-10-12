@@ -32,11 +32,12 @@ XU_EXTRA_GUID = "a8bd5df2-1a98-474e-8dd0-d92672d194fa"
 
 # Selectors on the main extension unit.
 SEL_MODE = 2           # framing/AI mode. Byte 0 is the mode and byte 1 its flag, but the
-                       # selector is a larger firmware-owned record, so writes are
-                       # read-modify-write and the readback is state, not an echo.
+                       # selector is a larger firmware-owned record (61 bytes on the Link 2,
+                       # 52 on the Link 1), so writes are read-modify-write and the
+                       # readback is state, not an echo.
 SEL_GESTURE_MASK = 5   # 1 byte, bitmask of enabled gesture groups
-SEL_GESTURE_BIND = 6   # 5 bytes, one action per gesture slot (firmware-owned; writes
-                       # are accepted but do not stick)
+SEL_GESTURE_BIND = 6   # 5 bytes, one action per gesture slot (firmware-owned; values
+                       # other than 0, 1 and 2 are accepted but ignored)
 SEL_NOISE_CANCEL = 7   # 1 byte, microphone noise cancellation
 SEL_SERIAL = 12        # 32 bytes, unit serial (writable -- never touch)
 SEL_SETTINGS_RESET = 14  # 1 byte: factory settings reset, applied at the next power-up
@@ -44,11 +45,11 @@ SEL_USB_MODE = 17      # 1 byte, 0=uvc 1=photo 2=mass-storage -- drops the webca
 SEL_TRACK_FRAME = 19   # 1 byte, 1=head 2=upper body 3=full body
 SEL_TRACK_TARGET = 21  # normalised float x/y of the tracking target
 SEL_FRAME_BIAS = 24    # 2x int16 framing offset
-SEL_PTZ_SPEED = 25     # gimbal movement speed
+SEL_ISO = 25           # uint16 ISO; in auto exposure it reads back the current ISO
 SEL_PTZ_ABSOLUTE = 26  # 2x int32 (tilt, pan) in arcseconds -- mirrors V4L2
 SEL_FEATURE_FLAGS = 27  # 2 bytes: little-endian bitmask of feature flags (persisted)
-SEL_EXPOSURE = 29      # shutter time
-SEL_AE_MODE = 30       # auto-exposure mode
+SEL_SHUTTER = 29       # uint16 N for an exposure of 1/N s
+SEL_AE_MODE = 30       # exposure mode; 1 = manual (ISO and shutter from 25 and 29)
 
 # Writing these can brick the webcam for the session, overwrite its identity, or
 # push malformed blobs into firmware storage. `linkctl raw` refuses them unless
@@ -57,13 +58,14 @@ UNSAFE_SELECTORS = {
     SEL_USB_MODE: "switches the USB personality; the camera stops being a webcam until replug",
     SEL_SERIAL: "overwrites the unit serial number",
     SEL_SETTINGS_RESET: "resets every setting to factory defaults at the next power-up",
-    3: "bulk configuration blob",
-    4: "bulk configuration blob",
+    1: "factory service hook",
+    3: "identity block; writes are persisted",
+    4: "raw command channel to the gimbal controller; can miscalibrate the gimbal",
     8: "bulk transfer buffer",
-    10: "mode string blob",
-    13: "device identifier",
+    10: "switches the USB personality and restarts the camera",
+    13: "licence blob; writes are persisted",
     16: "tone curve blob",
-    23: "unidentified blob",
+    23: "key blob; writes are persisted",
 }
 
 # byte[0], byte[1] written to SEL_MODE.
@@ -76,6 +78,10 @@ MODES = {
 }
 
 TRACK_FRAMES = {"head": 1, "upper": 2, "full": 3}
+
+# Models whose selector 2 reads back the active mode. The Link 1 reports 0xFF while a
+# change is being applied and then the mode in force; the Link 2 keeps 0xFF.
+MODE_READBACK_PIDS = {"4c01"}
 
 # Bit numbers in SEL_FEATURE_FLAGS. A write replaces every flag at once, so they are
 # always changed read-modify-write.
@@ -405,14 +411,26 @@ class LinkCamera:
 
     # ---------- proprietary modes ----------
 
-    def set_mode(self, name):
+    def set_mode(self, name, confirm=False, timeout=3.0):
+        """Select a framing mode.
+
+        With confirm=True, on models that read the mode back, wait for the change to
+        settle and return the mode the camera reports. It can differ from the request:
+        tracking with nobody in view falls back to normal, and a mode the model lacks
+        is ignored.
+        """
         try:
             mode, flag = MODES[name]
         except KeyError:
             raise ValueError(f"unknown mode {name!r}; choose from {', '.join(MODES)}")
         self.xu_update(SEL_MODE, {0: mode, 1: flag})
         self._remember_mode(name)
-        return name
+        if not confirm or self.info.get("pid") not in MODE_READBACK_PIDS:
+            return name
+        deadline = time.monotonic() + timeout
+        while self.xu_read(SEL_MODE)[0] == 0xFF and time.monotonic() < deadline:
+            time.sleep(0.1)
+        return self.get_mode()
 
     def get_mode(self):
         """Best-effort mode readback.

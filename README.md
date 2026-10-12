@@ -196,11 +196,16 @@ they stop responding after toggling them off, unplug and replug the camera to re
 defaults. The firmware also clamps the mask to the groups the model supports, so this
 camera reports `0x0e` even when asked for all five groups.
 
-**Mode readback is not an echo.** Selector 2 is a 61-byte firmware-owned record, not a
-mode register. Once any mode has been set the firmware writes `0xFF` into byte 0, which
-says "a mode is active" without saying which. `linkctl` therefore reports the mode this
-process last set. For the same reason mode changes are written read-modify-write, so a
-write patches two bytes instead of blanking the other 59.
+**Mode readback is not an echo.** Selector 2 is a firmware-owned record (61 bytes on the
+Link 2, 52 on the Link 1), not a mode register, so mode changes are written
+read-modify-write and patch two bytes instead of blanking the rest.
+
+- On the Link 2, once any mode has been set the firmware writes `0xFF` into byte 0, which
+  says "a mode is active" without saying which. `linkctl` therefore reports the mode this
+  process last set.
+- On the Link 1, `0xFF` only means "a change is being applied". After a second or two
+  byte 0 holds the mode in force. `linkctl mode NAME` waits for that and reports what the
+  camera actually did: tracking with nobody in view falls back to `normal`.
 
 **Feature flags are one bitmask, stored in the camera.** `linkctl feature` lists them with
 their current state. Each change reads the flags, flips one bit and writes them back, and
