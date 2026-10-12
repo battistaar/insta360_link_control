@@ -57,12 +57,24 @@ QUERYMENU_SIZE = struct.calcsize(QUERYMENU_FMT)  # 44
 XU_QUERY_FMT = "BBBxH2xQ"
 XU_QUERY_SIZE = struct.calcsize(XU_QUERY_FMT)  # 16
 
+# struct v4l2_ext_control is __packed: { u32 id, size, reserved2[1];
+#                                        union { s32 value; s64 value64; void *ptr; }; }
+EXT_CONTROL_FMT = "=IIIq"
+EXT_CONTROL_SIZE = struct.calcsize(EXT_CONTROL_FMT)  # 20
+
+# struct v4l2_ext_controls { u32 which, count, error_idx; s32 request_fd; u32 reserved[1];
+#                            struct v4l2_ext_control *controls; }
+EXT_CONTROLS_FMT = "IIIiI4xQ"
+EXT_CONTROLS_SIZE = struct.calcsize(EXT_CONTROLS_FMT)  # 32
+V4L2_CTRL_WHICH_CUR_VAL = 0
+
 # --- ioctl numbers ---
 VIDIOC_QUERYCAP = _IOR("V", 0, CAPABILITY_SIZE)
 VIDIOC_G_CTRL = _IOWR("V", 27, CONTROL_SIZE)
 VIDIOC_S_CTRL = _IOWR("V", 28, CONTROL_SIZE)
 VIDIOC_QUERYCTRL = _IOWR("V", 36, QUERYCTRL_SIZE)
 VIDIOC_QUERYMENU = _IOWR("V", 37, QUERYMENU_SIZE)
+VIDIOC_S_EXT_CTRLS = _IOWR("V", 72, EXT_CONTROLS_SIZE)
 UVCIOC_CTRL_QUERY = _IOWR("u", 0x21, XU_QUERY_SIZE)
 
 # --- capability bits ---
