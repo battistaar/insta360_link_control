@@ -4,6 +4,7 @@ Uses only the standard library. The optional live preview shells out to ffmpeg
 and reads raw PPM frames from its stdout, which Tk can display directly.
 """
 
+import errno
 import queue
 import shutil
 import subprocess
@@ -13,11 +14,13 @@ import tkinter as tk
 from tkinter import ttk
 
 from . import ioctls as io
-from .camera import MODES, RESTARTING_FEATURES, TRACK_FRAMES, LinkCamera
+from .camera import MODES, RESTARTING_FEATURES, TRACK_FRAMES, CameraNotFound, LinkCamera
 
 APP_NAME = "Link Control"
 
 PREVIEW_WIDTH, PREVIEW_HEIGHT = 480, 270
+# ioctl errors that mean the camera has left the bus (unplugged, or restarting).
+GONE_ERRNOS = {errno.ENODEV, errno.ENXIO, errno.EIO, errno.EPROTO, errno.EBADF}
 
 MODE_LABELS = [
     ("normal", "Normal"),
@@ -157,6 +160,9 @@ class ControlPanel(ttk.Frame):
         self._repeat_job = None
         self._suppress = False  # set while we push camera state into the widgets
         self._said_at = 0.0
+        self._disconnected = False
+        self._resume_preview = False
+        self._reconnect_not_before = 0.0
 
         self.grid(sticky="nsew")
         master.columnconfigure(0, weight=1)
@@ -371,7 +377,10 @@ class ControlPanel(ttk.Frame):
         ]
         for index, (key, value) in enumerate(details):
             ttk.Label(info, text=key, foreground="#666").grid(row=index, column=0, sticky="w", padx=(0, 10))
-            ttk.Label(info, text=value).grid(row=index, column=1, sticky="w")
+            label = ttk.Label(info, text=value)
+            label.grid(row=index, column=1, sticky="w")
+            if key == "Node":
+                self.node_label = label
 
     def _add_slider(self, parent, row, label, cid, ctrl):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3)
@@ -439,6 +448,10 @@ class ControlPanel(ttk.Frame):
                 button.configure(text=f"{slot}: empty")
 
     def _poll_position(self):
+        if self._disconnected:
+            self._try_reconnect()
+            self.after(1000, self._poll_position)
+            return
         try:
             pan, tilt, zoom = self.cam.get_pan(), self.cam.get_tilt(), self.cam.get_zoom()
             text = f"pan {pan:+.1f}°   tilt {tilt:+.1f}°   zoom {zoom:.2f}x"
@@ -451,9 +464,58 @@ class ControlPanel(ttk.Frame):
             if time.monotonic() - self._said_at > 3.0:
                 self._said_at = 0.0
                 self.status.configure(text=text)
+        except OSError as exc:
+            if exc.errno in GONE_ERRNOS:
+                self._on_disconnect()
+        self.after(500, self._poll_position)
+
+    def _camera_gone(self):
+        try:
+            self.cam.get_zoom()
+        except OSError as exc:
+            return exc.errno in GONE_ERRNOS
+        return False
+
+    def _on_disconnect(self, grace=0.0):
+        """The camera left the bus: drop it and wait for it to come back.
+
+        grace delays the first reconnect attempt. A camera that is restarting
+        itself stays on the bus for about a second after the write, and opening
+        it in that window would only find the device that is going away.
+        """
+        self._disconnected = True
+        self._reconnect_not_before = time.monotonic() + grace
+        self._resume_preview = self.preview_var.get()
+        if self._resume_preview:
+            self.preview_var.set(False)
+            self.toggle_preview()
+        try:
+            self.cam.close()
         except OSError:
             pass
-        self.after(500, self._poll_position)
+        self._said_at = 0.0
+        self.status.configure(text="Camera disconnected -- waiting for it to come back...")
+
+    def _try_reconnect(self):
+        if time.monotonic() < self._reconnect_not_before:
+            return
+        try:
+            cam = LinkCamera()
+        except (CameraNotFound, OSError):
+            return  # not back yet, or udev has not granted access yet
+        try:
+            cam.get_zoom()
+        except OSError:
+            cam.close()  # enumerated but not answering yet
+            return
+        self.cam = cam
+        self._disconnected = False
+        self.node_label.configure(text=cam.node)
+        self.refresh_from_camera()
+        if self._resume_preview:
+            self.preview_var.set(True)
+            self.toggle_preview()
+        self.say(f"Camera reconnected on {cam.node}")
 
     # ---------- handlers ----------
 
@@ -583,8 +645,9 @@ class ControlPanel(ttk.Frame):
                 return
         try:
             if self.cam.set_feature(name, state):
-                self.say(f"{name} -> {'on' if state else 'off'}; the camera is restarting. "
-                         "Reopen Link Control once it is back.")
+                self._on_disconnect(grace=3.0)
+                self.say(f"{name} -> {'on' if state else 'off'}; the camera is restarting "
+                         "and will reconnect in a few seconds")
                 return
             self._refresh_features()
             self.say(f"{name} -> {'on' if state else 'off'}")
@@ -671,6 +734,9 @@ class ControlPanel(ttk.Frame):
                 self.toggle_preview()
                 return
         elif self.preview.error:
+            if self._camera_gone():
+                self._on_disconnect()  # resumes the preview after reconnecting
+                return
             self.say(f"Preview stopped: {self.preview.error}")
             self.preview_var.set(False)
             self.toggle_preview()
@@ -730,8 +796,12 @@ def run(camera=None):
     def on_close():
         panel.shutdown()
         root.destroy()
-        if owns_camera:
-            camera.close()
+        # After a reconnect the panel holds a camera this function did not open.
+        if owns_camera or panel.cam is not camera:
+            try:
+                panel.cam.close()
+            except OSError:
+                pass
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     root.mainloop()
