@@ -164,6 +164,21 @@ time, so leave it off before joining a call.
 
 ---
 
+## Stream Deck
+
+[Link Controls for OpenDeck](https://github.com/battistaar/opendeck-link-controls) puts the
+camera on an Elgato Stream Deck under Linux, through [OpenDeck](https://github.com/nekename/OpenDeck).
+It is built on `linkctl`, so it needs no other dependencies, and offers:
+
+- pan/tilt and zoom keys that move by a step or continuously while held;
+- an AI tracking key whose icon shows whether tracking is on;
+- keys that recall a preset saved on this computer or in the camera.
+
+It only reads the camera's state while an application is streaming its video. See its
+README for installation.
+
+---
+
 ## What actually works on the Link 2
 
 Everything below was tested on real hardware by moving the camera and comparing captured
