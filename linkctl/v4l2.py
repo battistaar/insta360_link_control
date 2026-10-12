@@ -159,6 +159,27 @@ class V4L2Device:
         fcntl.ioctl(self.fd, io.VIDIOC_S_CTRL, buf, True)
         return int(value)
 
+    def set_many(self, values):
+        """Set several controls in one VIDIOC_S_EXT_CTRLS call. Returns the values written.
+
+        Controls that share one UVC control, such as pan and tilt, are then sent to the
+        camera together, instead of each write carrying the other's cached old value.
+        """
+        written = {}
+        for cid, value in values.items():
+            ctrl = self.control(cid)
+            written[cid] = int(ctrl.clamp(value) if ctrl is not None else value)
+        array = bytearray()
+        for cid, value in written.items():
+            array += struct.pack(io.EXT_CONTROL_FMT, cid, 0, 0, value)
+        buf = (ctypes.c_uint8 * len(array)).from_buffer_copy(bytes(array))
+        request = bytearray(struct.pack(
+            io.EXT_CONTROLS_FMT, io.V4L2_CTRL_WHICH_CUR_VAL, len(written), 0, 0, 0,
+            ctypes.addressof(buf),
+        ))
+        fcntl.ioctl(self.fd, io.VIDIOC_S_EXT_CTRLS, request, True)
+        return written
+
     # ---------- UVC extension units ----------
 
     def xu(self, unit, selector, query, size):

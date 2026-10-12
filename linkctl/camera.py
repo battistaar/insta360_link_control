@@ -370,6 +370,20 @@ class LinkCamera:
     def set_tilt(self, degrees):
         return self.dev.set(io.V4L2_CID_TILT_ABSOLUTE, round(degrees * ARCSEC_PER_DEGREE)) / ARCSEC_PER_DEGREE
 
+    def set_pan_tilt(self, pan, tilt):
+        """Set both angles in one request.
+
+        Pan and tilt are a single UVC control, so a pan write also resends the tilt the
+        driver last knew, and vice versa. After the gimbal has moved by other means that
+        value is stale, and two separate writes make it jump back briefly.
+        """
+        written = self.dev.set_many({
+            io.V4L2_CID_PAN_ABSOLUTE: round(pan * ARCSEC_PER_DEGREE),
+            io.V4L2_CID_TILT_ABSOLUTE: round(tilt * ARCSEC_PER_DEGREE),
+        })
+        return (written[io.V4L2_CID_PAN_ABSOLUTE] / ARCSEC_PER_DEGREE,
+                written[io.V4L2_CID_TILT_ABSOLUTE] / ARCSEC_PER_DEGREE)
+
     def set_zoom(self, factor):
         return self.dev.set(io.V4L2_CID_ZOOM_ABSOLUTE, round(factor * 100)) / 100
 
@@ -403,13 +417,11 @@ class LinkCamera:
         self.xu_write(SEL_PTZ_RELATIVE, bytes(4))
         time.sleep(0.2)
         tilt, pan = self.ptz_raw()
-        self.set_pan(pan / ARCSEC_PER_DEGREE)
-        self.set_tilt(tilt / ARCSEC_PER_DEGREE)
+        self.set_pan_tilt(pan / ARCSEC_PER_DEGREE, tilt / ARCSEC_PER_DEGREE)
 
     def center(self):
         """Point the gimbal straight ahead at 1x zoom."""
-        self.set_pan(0)
-        self.set_tilt(0)
+        self.set_pan_tilt(0, 0)
         self.set_zoom(1.0)
 
     # The gimbal stows at roughly -85 deg tilt when no application is streaming.
