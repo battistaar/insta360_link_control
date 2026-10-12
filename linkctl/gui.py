@@ -14,7 +14,16 @@ import tkinter as tk
 from tkinter import ttk
 
 from . import ioctls as io
-from .camera import MODES, RESTARTING_FEATURES, TRACK_FRAMES, CameraNotFound, LinkCamera
+from .camera import (
+    EV_RANGE,
+    ISO_RANGE,
+    MODES,
+    RESTARTING_FEATURES,
+    SHUTTER_RANGE,
+    TRACK_FRAMES,
+    CameraNotFound,
+    LinkCamera,
+)
 
 APP_NAME = "Link Control"
 
@@ -319,6 +328,30 @@ class ControlPanel(ttk.Frame):
         ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(2, 6))
         row += 1
 
+        self.exposure_widgets = {}
+        if self.cam.has_extension_unit:
+            self.auto_exposure_var = tk.BooleanVar()
+            ttk.Checkbutton(
+                image, text="Auto exposure", variable=self.auto_exposure_var,
+                command=self.on_auto_exposure,
+            ).grid(row=row, column=0, columnspan=3, sticky="w", pady=(2, 2))
+            row += 1
+            for key, label, (low, high) in (
+                ("ev", "Exposure comp. (EV)", EV_RANGE),
+                ("iso", "ISO", ISO_RANGE),
+                ("shutter", "Shutter (1/N s)", SHUTTER_RANGE),
+            ):
+                ttk.Label(image, text=label).grid(row=row, column=0, sticky="w", pady=3)
+                value_label = ttk.Label(image, text="-", width=6, anchor="e")
+                value_label.grid(row=row, column=2, sticky="e")
+                scale = ttk.Scale(
+                    image, from_=low, to=high, orient="horizontal",
+                    command=lambda v, k=key: self.on_exposure(k, v),
+                )
+                scale.grid(row=row, column=1, sticky="ew", padx=8)
+                self.exposure_widgets[key] = (scale, value_label)
+                row += 1
+
         ttk.Button(image, text="Restore defaults", command=self.restore_defaults).grid(
             row=row, column=0, columnspan=3, sticky="w", pady=(8, 0)
         )
@@ -422,6 +455,7 @@ class ControlPanel(ttk.Frame):
             if self.cam.dev.has(io.V4L2_CID_FOCUS_AUTO):
                 self.af_var.set(bool(self.cam.dev.get(io.V4L2_CID_FOCUS_AUTO)))
             if self.cam.has_extension_unit:
+                self._refresh_exposure()
                 mode = self.cam.get_mode()
                 if mode in MODES:
                     self.mode_var.set(mode)
@@ -572,6 +606,41 @@ class ControlPanel(ttk.Frame):
         except OSError as exc:
             self.say(f"Control write failed: {exc}")
 
+    def _refresh_exposure(self):
+        exposure = self.cam.get_exposure()
+        auto = exposure["mode"] == "auto"
+        self.auto_exposure_var.set(auto)
+        for key, (scale, label) in self.exposure_widgets.items():
+            value = exposure[key]
+            scale.set(value)
+            label.configure(text=f"{value:+.1f}" if key == "ev" else str(value))
+            # EV only acts in auto; ISO and shutter only in manual.
+            scale.configure(state="normal" if (key == "ev") == auto else "disabled")
+
+    def on_auto_exposure(self):
+        if self._suppress:
+            return
+        try:
+            self.cam.set_exposure_mode("auto" if self.auto_exposure_var.get() else "manual")
+        except OSError as exc:
+            self.say(f"Exposure mode failed: {exc}")
+        self._suppress = True
+        try:
+            self._refresh_exposure()
+        finally:
+            self._suppress = False
+
+    def on_exposure(self, key, value):
+        if self._suppress:
+            return
+        setter = {"ev": self.cam.set_ev, "iso": self.cam.set_iso, "shutter": self.cam.set_shutter}[key]
+        try:
+            written = setter(float(value) if key == "ev" else int(float(value)))
+            label = f"{written:+.1f}" if key == "ev" else str(written)
+            self.exposure_widgets[key][1].configure(text=label)
+        except OSError as exc:
+            self.say(f"Exposure write failed: {exc}")
+
     def on_awb(self):
         if self._suppress:
             return
@@ -681,6 +750,12 @@ class ControlPanel(ttk.Frame):
                     self.cam.dev.set(cid, ctrl.default)
                 except OSError:
                     pass
+        if self.cam.has_extension_unit:
+            try:
+                self.cam.set_exposure_mode("auto")
+                self.cam.set_ev(0)
+            except OSError:
+                pass
         self.refresh_from_camera()
         self.say("Image settings restored to defaults")
 

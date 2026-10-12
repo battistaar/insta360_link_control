@@ -46,6 +46,7 @@ SEL_USB_MODE = 17      # 1 byte, 0=uvc 1=photo 2=mass-storage -- drops the webca
 SEL_TRACK_FRAME = 19   # 1 byte, 1=head 2=upper body 3=full body
 SEL_TRACK_TARGET = 21  # normalised float x/y of the tracking target
 SEL_FRAME_BIAS = 24    # 2x int16 framing offset
+SEL_EV = 9             # int16 exposure compensation in 1/100 EV
 SEL_ISO = 25           # uint16 ISO; in auto exposure it reads back the current ISO
 SEL_PTZ_ABSOLUTE = 26  # 2x int32 (tilt, pan) in arcseconds -- mirrors V4L2
 SEL_FEATURE_FLAGS = 27  # 2 bytes: little-endian bitmask of feature flags (persisted)
@@ -79,6 +80,13 @@ MODES = {
 }
 
 TRACK_FRAMES = {"head": 1, "upper": 2, "full": 3}
+
+# Values of SEL_AE_MODE. Entering manual leaves ISO and shutter unset, so the
+# current automatic values are written straight after.
+EXPOSURE_MODES = {"auto": 2, "manual": 1}
+EV_RANGE = (-4.0, 4.0)       # brightness stops changing beyond this
+ISO_RANGE = (100, 6400)
+SHUTTER_RANGE = (25, 2000)   # N in 1/N s
 
 # Models whose selector 2 reads back the active mode. The Link 1 reports 0xFF while a
 # change is being applied and then the mode in force; the Link 2 keeps 0xFF.
@@ -530,6 +538,50 @@ class LinkCamera:
         if self.feature_flags() != new:
             raise OSError(errno.ENOTSUP, f"the camera did not apply {name}")
         return False
+
+    # ---------- exposure ----------
+
+    def get_exposure(self):
+        """{"mode", "iso", "shutter", "ev"}. In auto, ISO and shutter are the live values."""
+        ae = self.xu_read(SEL_AE_MODE)[0]
+        mode = next((name for name, value in EXPOSURE_MODES.items() if value == ae), f"unknown({ae})")
+        return {
+            "mode": mode,
+            "iso": struct.unpack_from("<H", self.xu_read(SEL_ISO), 0)[0],
+            "shutter": struct.unpack_from("<H", self.xu_read(SEL_SHUTTER), 0)[0],
+            "ev": struct.unpack_from("<h", self.xu_read(SEL_EV), 0)[0] / 100,
+        }
+
+    def set_exposure_mode(self, name):
+        if name not in EXPOSURE_MODES:
+            raise ValueError(f"unknown exposure mode {name!r}; choose from {', '.join(EXPOSURE_MODES)}")
+        current = self.get_exposure()
+        if current["mode"] == name:
+            return name
+        self.xu_write(SEL_AE_MODE, bytes([EXPOSURE_MODES[name]]))
+        if name == "manual":
+            # Start manual exposure from what auto had chosen, not from ISO 0.
+            self.set_iso(current["iso"])
+            self.set_shutter(current["shutter"])
+        return name
+
+    def set_iso(self, iso):
+        """Set ISO (manual exposure only). Returns the value written."""
+        iso = max(ISO_RANGE[0], min(ISO_RANGE[1], int(iso)))
+        self.xu_write(SEL_ISO, struct.pack("<H", iso))
+        return iso
+
+    def set_shutter(self, denominator):
+        """Set the shutter to 1/denominator s (manual exposure only)."""
+        denominator = max(SHUTTER_RANGE[0], min(SHUTTER_RANGE[1], int(denominator)))
+        self.xu_write(SEL_SHUTTER, struct.pack("<H", denominator))
+        return denominator
+
+    def set_ev(self, ev):
+        """Set exposure compensation in EV (auto exposure)."""
+        ev = max(EV_RANGE[0], min(EV_RANGE[1], float(ev)))
+        self.xu_write(SEL_EV, struct.pack("<h", round(ev * 100)))
+        return round(ev, 2)
 
     def set_noise_cancellation(self, enabled):
         self.xu_write(SEL_NOISE_CANCEL, bytes([1 if enabled else 0]))
