@@ -309,11 +309,26 @@ class LinkCamera:
         ctrl = self.dev.control(io.V4L2_CID_ZOOM_ABSOLUTE)
         return (ctrl.min / 100, ctrl.max / 100) if ctrl else None
 
+    def _get_angle(self, cid, ptz_index):
+        """Degrees from a V4L2 pan/tilt control, sanity-checked against its range.
+
+        After power-up the Link reports pan_absolute as 34116348 (about 9477 degrees)
+        until the first pan/tilt write. When the value is out of range, fall back to
+        the gimbal's own position from the extension unit.
+        """
+        value = self.dev.get(cid)
+        ctrl = self.dev.control(cid)
+        if ctrl is None or ctrl.min <= value <= ctrl.max:
+            return value / ARCSEC_PER_DEGREE
+        if self.has_extension_unit:
+            return self.ptz_raw()[ptz_index] / ARCSEC_PER_DEGREE
+        return ctrl.clamp(value) / ARCSEC_PER_DEGREE
+
     def get_pan(self):
-        return self.dev.get(io.V4L2_CID_PAN_ABSOLUTE) / ARCSEC_PER_DEGREE
+        return self._get_angle(io.V4L2_CID_PAN_ABSOLUTE, 1)
 
     def get_tilt(self):
-        return self.dev.get(io.V4L2_CID_TILT_ABSOLUTE) / ARCSEC_PER_DEGREE
+        return self._get_angle(io.V4L2_CID_TILT_ABSOLUTE, 0)
 
     def get_zoom(self):
         return self.dev.get(io.V4L2_CID_ZOOM_ABSOLUTE) / 100
