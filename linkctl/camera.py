@@ -38,6 +38,7 @@ SEL_GESTURE_MASK = 5   # 1 byte, bitmask of enabled gesture groups
 SEL_GESTURE_BIND = 6   # 5 bytes, one action per gesture slot (firmware-owned; values
                        # other than 0, 1 and 2 are accepted but ignored)
 SEL_NOISE_CANCEL = 7   # 1 byte, microphone noise cancellation
+SEL_STATUS = 11        # 5 bytes, read only; on the Link 1 byte 3 is 1 while video streams
 SEL_SERIAL = 12        # 32 bytes, unit serial (writable -- never touch)
 SEL_GIMBAL_RESET = 14  # 1 byte, write 1 to recentre (no observable effect on the Link 2)
 SEL_USB_MODE = 17      # 1 byte, 0=uvc 1=photo 2=mass-storage -- drops the webcam
@@ -78,8 +79,13 @@ MODES = {
 TRACK_FRAMES = {"head": 1, "upper": 2, "full": 3}
 
 # Models whose selector 2 reads back the active mode. The Link 1 reports 0xFF while a
-# change is being applied and then the mode in force; the Link 2 keeps 0xFF.
+# change is being applied and then the mode in force, but only while video streams:
+# otherwise it reads normal even when a mode such as tracking is set. The Link 2
+# keeps 0xFF.
 MODE_READBACK_PIDS = {"4c01"}
+
+# Models whose SEL_STATUS byte 3 says whether video is streaming.
+STREAM_STATUS_PIDS = {"4c01"}
 
 # Parameter IDs for the SEL_FEATURE multiplexer.
 FEATURES = {
@@ -361,8 +367,19 @@ class LinkCamera:
         after = self.ptz_raw()
         return before != after, before, after
 
-    # The gimbal stows at roughly -85 deg tilt when no application is streaming.
+    # The Link 2 stows at roughly -85 deg tilt when no application is streaming. The
+    # Link 1 stows at about -76 deg, within its normal range, so it is detected from
+    # the streaming status instead.
     PARKED_TILT_DEGREES = -80
+
+    def is_streaming(self):
+        """True/False if the camera reports whether video is streaming, else None."""
+        if not self.has_extension_unit or self.info.get("pid") not in STREAM_STATUS_PIDS:
+            return None
+        try:
+            return bool(self.xu_read(SEL_STATUS)[3])
+        except OSError:
+            return None
 
     def is_parked(self):
         """True when the gimbal is stowed because nothing is capturing video.
@@ -371,6 +388,9 @@ class LinkCamera:
         setpoint, but does not move, and on wake it restores the position it held when
         it last streamed rather than the setpoint. Measured on the Link 2.
         """
+        streaming = self.is_streaming()
+        if streaming is not None:
+            return not streaming
         if not self.has_extension_unit:
             return False
         try:
@@ -418,6 +438,9 @@ class LinkCamera:
         data = self.xu_read(SEL_MODE)
         if data[0] == 0xFF:
             return self._last_mode or self._recall_mode() or "custom"
+        if self.is_streaming() is False:
+            # The Link 1 reports normal while idle, whatever mode is set.
+            return self._last_mode or self._recall_mode() or "normal"
         for name, (mode, flag) in MODES.items():
             if data[0] == mode and data[1] == flag:
                 return name
