@@ -7,6 +7,7 @@ import time
 
 from . import ioctls as io
 from .camera import (
+    EXPOSURE_MODES,
     FEATURES,
     MODES,
     RESTARTING_FEATURES,
@@ -71,6 +72,8 @@ def cmd_info(args, cam):
         print(f"  framing   {cam.get_track_frame()}")
         print(f"  gestures  mask 0x{cam.get_gesture_mask():02x}")
         print(f"  noise-cx  {'on' if cam.get_noise_cancellation() else 'off'}")
+        e = cam.get_exposure()
+        print(f"  exposure  {e['mode']}  ISO {e['iso']}  shutter 1/{e['shutter']}  EV {e['ev']:+.1f}")
         enabled = [name for name, on in cam.get_features().items() if on]
         print(f"  flags     0x{cam.feature_flags():04x}  {', '.join(enabled) or 'none'}")
 
@@ -220,6 +223,24 @@ def cmd_feature(args, cam):
               "in a few seconds")
     else:
         print(f"{args.name} -> {args.state}")
+    return 0
+
+
+def cmd_exposure(args, cam):
+    if args.mode:
+        cam.set_exposure_mode(args.mode)
+    if args.iso is not None or args.shutter is not None:
+        if cam.get_exposure()["mode"] != "manual":
+            return _fail("--iso and --shutter need manual exposure: "
+                         "`linkctl exposure manual --iso N`")
+        if args.iso is not None:
+            cam.set_iso(args.iso)
+        if args.shutter is not None:
+            cam.set_shutter(args.shutter)
+    if args.ev is not None:
+        cam.set_ev(args.ev)
+    e = cam.get_exposure()
+    print(f"{e['mode']}  ISO {e['iso']}  shutter 1/{e['shutter']}  EV {e['ev']:+.1f}")
     return 0
 
 
@@ -385,6 +406,13 @@ def build_parser():
     p.add_argument("--yes", action="store_true",
                    help="confirm a change that restarts the camera")
     p.set_defaults(func=cmd_feature)
+
+    p = sub.add_parser("exposure", help="exposure mode, ISO, shutter and EV compensation")
+    p.add_argument("mode", nargs="?", choices=sorted(EXPOSURE_MODES))
+    p.add_argument("--iso", type=int, help="ISO, 100-6400 (manual)")
+    p.add_argument("--shutter", type=int, metavar="N", help="shutter 1/N s, 25-2000 (manual)")
+    p.add_argument("--ev", type=float, help="exposure compensation, -4.0 to +4.0 (auto)")
+    p.set_defaults(func=cmd_exposure)
 
     p = sub.add_parser("gestures", help="hand gesture control on/off")
     p.add_argument("state", nargs="?", choices=["on", "off"])

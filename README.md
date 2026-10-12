@@ -116,6 +116,7 @@ linkctl gestures [on|off]        hand gesture control
 linkctl noise [on|off]           microphone noise cancellation
 linkctl feature [NAME [on|off]]  list, read or toggle feature flags
 
+linkctl exposure [auto|manual]   exposure mode, with --iso N, --shutter N (1/N s), --ev X
 linkctl get CONTROL              e.g. brightness, contrast, focus
 linkctl set CONTROL VALUE
 
@@ -139,6 +140,8 @@ linkctl preset go 1             # snap back to it
 linkctl track on                # follow me
 linkctl frame upper             # ...framing head and shoulders
 linkctl set brightness 65
+linkctl exposure --ev 0.7        # brighter, still automatic
+linkctl exposure manual --iso 400 --shutter 100
 ```
 
 ---
