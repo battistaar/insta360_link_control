@@ -108,9 +108,10 @@ linkctl tilt [DEGREES]           get or set tilt      (-90..+100)
 linkctl zoom [FACTOR]            get or set zoom      (1.0..4.0)
 linkctl move DPAN [DTILT]        nudge by a relative amount
 linkctl center                   pan 0, tilt 0, zoom 1x
+linkctl drive PAN [TILT]         move continuously, speed -10..10, for --seconds (default 1)
 
 linkctl mode [normal|track|whiteboard|overhead|deskview]
-linkctl track [on|off]           AI subject tracking
+linkctl track [on|off]           AI subject tracking; --speed 0-3 sets how fast it follows
 linkctl frame [head|upper|full]  how tightly tracking frames you
 linkctl gestures [on|off]        hand gesture control
 linkctl noise [on|off]           microphone noise cancellation
@@ -149,7 +150,7 @@ linkctl set brightness 65
 linkctl gui
 ```
 
-Live preview, a gimbal pad with press-and-hold repeat, zoom, six presets, the framing
+Live preview, a gimbal pad (click to step, hold to move smoothly), zoom, six presets, the framing
 modes, and every image control. Sliders whose value is currently owned by an auto mode
 (focus under autofocus, white balance under AWB) are greyed out rather than silently
 ignoring you.

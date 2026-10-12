@@ -158,6 +158,7 @@ class ControlPanel(ttk.Frame):
         self.preview = None
         self.photo = None
         self._repeat_job = None
+        self._driving = False
         self._suppress = False  # set while we push camera state into the widgets
         self._said_at = 0.0
         self._disconnected = False
@@ -272,6 +273,15 @@ class ControlPanel(ttk.Frame):
                 frame_box, text=label, value=value, variable=self.frame_var,
                 command=self.on_frame,
             ).grid(row=0, column=index, padx=(0, 10), sticky="w")
+        ttk.Label(frame_box, text="Speed").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.track_speed_var = tk.IntVar(value=1)
+        speeds = ttk.Frame(frame_box)
+        speeds.grid(row=1, column=1, columnspan=len(FRAME_LABELS), sticky="w", pady=(6, 0))
+        for speed, label in ((0, "Slow"), (1, "1"), (2, "2"), (3, "Fast")):
+            ttk.Radiobutton(
+                speeds, text=label, value=speed, variable=self.track_speed_var,
+                command=self.on_track_speed,
+            ).pack(side="left", padx=(0, 8))
 
         toggles = ttk.LabelFrame(framing, text="Camera toggles", padding=8)
         toggles.grid(row=2, column=0, sticky="ew", pady=(10, 0))
@@ -429,6 +439,7 @@ class ControlPanel(ttk.Frame):
                     self.frame_var.set(frame)
                 self.gesture_var.set(bool(self.cam.get_gesture_mask()))
                 self.noise_var.set(self.cam.get_noise_cancellation())
+                self.track_speed_var.set(self.cam.get_tracking_speed())
                 self._refresh_features()
             self._refresh_presets()
         except OSError as exc:
@@ -519,18 +530,33 @@ class ControlPanel(ttk.Frame):
 
     # ---------- handlers ----------
 
+    # Speed of continuous motion while a pad button is held, by step size.
+    DRIVE_SPEEDS = {1.0: 2, 5.0: 5, 15.0: 10}
+
     def _start_nudge(self, dx, dy):
         self._nudge(dx, dy)
-        self._repeat_job = self.after(400, lambda: self._repeat_nudge(dx, dy))
+        self._repeat_job = self.after(400, lambda: self._start_drive(dx, dy))
 
-    def _repeat_nudge(self, dx, dy):
-        self._nudge(dx, dy)
-        self._repeat_job = self.after(150, lambda: self._repeat_nudge(dx, dy))
+    def _start_drive(self, dx, dy):
+        """Held past the first step: move smoothly until the button is released."""
+        self._repeat_job = None
+        speed = self.DRIVE_SPEEDS.get(self.step_var.get(), 5)
+        try:
+            self.cam.drive(dx * speed, dy * speed)
+            self._driving = True
+        except OSError as exc:
+            self.say(f"Move failed: {exc}")
 
     def _stop_nudge(self, _event=None):
         if self._repeat_job is not None:
             self.after_cancel(self._repeat_job)
             self._repeat_job = None
+        if self._driving:
+            self._driving = False
+            try:
+                self.cam.stop()
+            except OSError as exc:
+                self.say(f"Stop failed: {exc}")
 
     def _nudge(self, dx, dy):
         step = self.step_var.get()
@@ -617,6 +643,15 @@ class ControlPanel(ttk.Frame):
             self.say(f"Gestures {'on' if self.gesture_var.get() else 'off'}")
         except Exception as exc:
             self.say(f"Gesture toggle failed: {exc}")
+
+    def on_track_speed(self):
+        if self._suppress:
+            return
+        try:
+            speed = self.cam.set_tracking_speed(self.track_speed_var.get())
+            self.say(f"Tracking speed {speed}")
+        except OSError as exc:
+            self.say(f"Tracking speed failed: {exc}")
 
     def on_noise(self):
         if self._suppress:
@@ -744,6 +779,7 @@ class ControlPanel(ttk.Frame):
         self.after(33, self._pump_preview)
 
     def shutdown(self):
+        self._stop_nudge()
         if self.preview:
             self.preview.stop()
 

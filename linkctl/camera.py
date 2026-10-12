@@ -42,8 +42,10 @@ SEL_NOISE_CANCEL = 7   # 1 byte, microphone noise cancellation
 SEL_SERIAL = 12        # 32 bytes, unit serial (writable -- never touch)
 SEL_SETTINGS_RESET = 14  # 1 byte: factory settings reset, applied at the next power-up
 SEL_USB_MODE = 17      # 1 byte, 0=uvc 1=photo 2=mass-storage -- drops the webcam
+SEL_TRACK_SPEED = 18   # 1 byte, how fast tracking follows: 0 (slowest) to 3
 SEL_TRACK_FRAME = 19   # 1 byte, 1=head 2=upper body 3=full body
 SEL_TRACK_TARGET = 21  # normalised float x/y of the tracking target
+SEL_PTZ_RELATIVE = 22  # [pan dir, pan speed, tilt dir, tilt speed]; continuous motion
 SEL_FRAME_BIAS = 24    # 2x int16 framing offset
 SEL_ISO = 25           # uint16 ISO; in auto exposure it reads back the current ISO
 SEL_PTZ_ABSOLUTE = 26  # 2x int32 (tilt, pan) in arcseconds -- mirrors V4L2
@@ -379,6 +381,31 @@ class LinkCamera:
             self.set_tilt(self.get_tilt() + d_tilt)
         return self.get_pan(), self.get_tilt()
 
+    # Selector 22 directions as measured on the Link 1: pan 1 turns right and 0xFF
+    # left; tilt 0xFF raises and 1 lowers. Speed 1 is about 2.5 deg/s, 10 about 26.
+    DRIVE_SPEED_MAX = 10
+
+    def drive(self, pan_speed=0, tilt_speed=0):
+        """Move continuously until stop(). Speeds -10..10; positive is right and up."""
+        def axis(speed, positive, negative):
+            speed = max(-self.DRIVE_SPEED_MAX, min(self.DRIVE_SPEED_MAX, int(speed)))
+            if speed == 0:
+                return [0, 0]
+            return [positive if speed > 0 else negative, abs(speed)]
+        self.xu_write(SEL_PTZ_RELATIVE, bytes(axis(pan_speed, 0x01, 0xFF) + axis(tilt_speed, 0xFF, 0x01)))
+
+    def stop(self):
+        """End drive() and make the V4L2 pan/tilt setpoint match where the gimbal stopped.
+
+        Continuous motion does not update the setpoint, so without this the next
+        absolute or relative move would start from the old position.
+        """
+        self.xu_write(SEL_PTZ_RELATIVE, bytes(4))
+        time.sleep(0.2)
+        tilt, pan = self.ptz_raw()
+        self.set_pan(pan / ARCSEC_PER_DEGREE)
+        self.set_tilt(tilt / ARCSEC_PER_DEGREE)
+
     def center(self):
         """Point the gimbal straight ahead at 1x zoom."""
         self.set_pan(0)
@@ -510,6 +537,15 @@ class LinkCamera:
         if self.feature_flags() != new:
             raise OSError(errno.ENOTSUP, f"the camera did not apply {name}")
         return False
+
+    def get_tracking_speed(self):
+        return self.xu_read(SEL_TRACK_SPEED)[0]
+
+    def set_tracking_speed(self, speed):
+        """How fast tracking follows the subject: 0 (slowest) to 3."""
+        speed = max(0, min(3, int(speed)))
+        self.xu_write(SEL_TRACK_SPEED, bytes([speed]))
+        return speed
 
     def set_noise_cancellation(self, enabled):
         self.xu_write(SEL_NOISE_CANCEL, bytes([1 if enabled else 0]))

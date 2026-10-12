@@ -185,11 +185,23 @@ def cmd_mode(args, cam):
 
 
 def cmd_track(args, cam):
-    if args.state is None:
-        print("on" if cam.get_tracking() else "off")
-    else:
+    if args.speed is not None:
+        cam.set_tracking_speed(args.speed)
+    if args.state is not None:
         cam.set_tracking(args.state == "on")
-        print(args.state)
+    state = args.state or ("on" if cam.get_tracking() else "off")
+    print(f"{state}  speed {cam.get_tracking_speed()}")
+    return 0
+
+
+def cmd_drive(args, cam):
+    cam.drive(args.pan_speed, args.tilt_speed)
+    try:
+        time.sleep(args.seconds)
+    finally:
+        cam.stop()
+    print(f"pan {cam.get_pan():+.1f}°  tilt {cam.get_tilt():+.1f}°")
+    _warn_if_parked(cam)
     return 0
 
 
@@ -364,6 +376,12 @@ def build_parser():
     p.add_argument("d_tilt", type=float, nargs="?", default=0.0)
     p.set_defaults(func=cmd_move)
 
+    p = sub.add_parser("drive", help="move continuously at a speed, then stop")
+    p.add_argument("pan_speed", type=int, help="-10..10, positive turns right")
+    p.add_argument("tilt_speed", type=int, nargs="?", default=0, help="-10..10, positive tilts up")
+    p.add_argument("--seconds", type=float, default=1.0, help="how long to move (default 1)")
+    p.set_defaults(func=cmd_drive)
+
     sub.add_parser("center", help="pan 0, tilt 0, zoom 1x").set_defaults(func=cmd_center)
     sub.add_parser("reset", help="deprecated alias for center").set_defaults(func=cmd_reset)
 
@@ -373,6 +391,8 @@ def build_parser():
 
     p = sub.add_parser("track", help="AI subject tracking on/off")
     p.add_argument("state", nargs="?", choices=["on", "off"])
+    p.add_argument("--speed", type=int, choices=range(4), metavar="0-3",
+                   help="how fast tracking follows the subject")
     p.set_defaults(func=cmd_track)
 
     p = sub.add_parser("frame", help="how tightly tracking frames the subject")
