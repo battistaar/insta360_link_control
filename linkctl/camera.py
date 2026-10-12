@@ -716,18 +716,28 @@ class LinkCamera:
         With settle=0 return at once; the caller must then call sync_setpoints(zoom=True)
         once the gimbal has stopped.
         """
+        start = self.ptz_raw()
         self._camera_preset_write(SEL_PRESET_RECALL, slot)
         if not settle:
             return
-        deadline = time.monotonic() + settle
-        last = None
-        while time.monotonic() < deadline:
+        began, last = time.monotonic(), None
+        while time.monotonic() - began < settle:
             time.sleep(0.3)
             now = self.ptz_raw()
-            if now == last:
+            if self.preset_move_done(start, last, now, time.monotonic() - began):
                 break
             last = now
         self.sync_setpoints(zoom=True)
+
+    # The gimbal starts towards a recalled preset about half a second after the write.
+    # Syncing the setpoints before it starts would cancel the move.
+    PRESET_START_TIMEOUT = 1.5
+
+    def preset_move_done(self, start, last, now, elapsed):
+        """Whether a preset recall that began at position `start` has finished."""
+        if now == start:
+            return elapsed >= self.PRESET_START_TIMEOUT  # never moved: already there
+        return now == last
 
     def list_presets(self):
         return self._load_presets()
