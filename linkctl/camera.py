@@ -53,6 +53,11 @@ SEL_FEATURE_FLAGS = 27  # 2 bytes: little-endian bitmask of feature flags (persi
 SEL_SHUTTER = 29       # uint16 N for an exposure of 1/N s
 SEL_AE_MODE = 30       # exposure mode; 1 = manual (ISO and shutter from 25 and 29)
 
+# Selectors on the extra extension unit.
+SEL_PRESET_COUNT = 3   # 1 byte, read only: number of on-camera preset slots
+SEL_PRESET_SAVE = 4    # 1 byte, write only: store pan/tilt/zoom in slot N (0-based)
+SEL_PRESET_RECALL = 5  # 1 byte, write only: move to slot N
+
 # Writing these can brick the webcam for the session, overwrite its identity, or
 # push malformed blobs into firmware storage. `linkctl raw` refuses them unless
 # --force is given; the high-level API never touches them at all.
@@ -402,9 +407,15 @@ class LinkCamera:
         """
         self.xu_write(SEL_PTZ_RELATIVE, bytes(4))
         time.sleep(0.2)
+        self._sync_setpoints()
+
+    def _sync_setpoints(self, zoom=False):
+        """Write the gimbal's actual position back as the V4L2 setpoint."""
         tilt, pan = self.ptz_raw()
         self.set_pan(pan / ARCSEC_PER_DEGREE)
         self.set_tilt(tilt / ARCSEC_PER_DEGREE)
+        if zoom:
+            self.set_zoom(struct.unpack_from("<H", self.xu_read(SEL_MODE), 50)[0] / 100)
 
     def center(self):
         """Point the gimbal straight ahead at 1x zoom."""
@@ -678,6 +689,41 @@ class LinkCamera:
         self.set_pan(preset["pan"])
         self.set_tilt(preset["tilt"])
         return preset
+
+    # On-camera presets live in the camera's own storage, so they follow it to other
+    # computers. Slots are numbered from 1 here, from 0 on the wire. The camera does
+    # not report what a slot holds.
+
+    def camera_preset_slots(self):
+        if self.xu_extra is None:
+            return 0
+        return self.xu_read(SEL_PRESET_COUNT, unit=self.xu_extra)[0]
+
+    def _camera_preset_write(self, selector, slot):
+        count = self.camera_preset_slots()
+        if not 1 <= slot <= count:
+            raise ValueError(f"camera preset slots are 1-{count}" if count
+                             else "this camera has no on-camera presets")
+        self.xu_write(selector, bytes([slot - 1]), unit=self.xu_extra, force=True)
+
+    def save_camera_preset(self, slot):
+        self._camera_preset_write(SEL_PRESET_SAVE, slot)
+
+    def recall_camera_preset(self, slot, settle=5.0):
+        """Move to an on-camera preset and wait for the gimbal to arrive.
+
+        Recalling does not update the V4L2 setpoints, so they are synced afterwards.
+        """
+        self._camera_preset_write(SEL_PRESET_RECALL, slot)
+        deadline = time.monotonic() + settle
+        last = None
+        while time.monotonic() < deadline:
+            time.sleep(0.3)
+            now = self.ptz_raw()
+            if now == last:
+                break
+            last = now
+        self._sync_setpoints(zoom=True)
 
     def list_presets(self):
         return self._load_presets()

@@ -121,6 +121,7 @@ linkctl get CONTROL              e.g. brightness, contrast, focus
 linkctl set CONTROL VALUE
 
 linkctl preset save|go|rm SLOT   pan/tilt/zoom presets, stored on disk
+                                 --camera: slots 1-6 stored in the camera itself
 linkctl preset list
 
 linkctl raw dump                 every extension-unit selector, with lengths
@@ -230,8 +231,9 @@ which holds the serial number. Selector 14 is blocked as well: it resets every s
 its factory default the next time the camera powers up. Bulk configuration blobs are
 blocked too.
 
-Writes to extension units 10 and 11 are blocked outright, because their selectors are not
-mapped and several are write-only with unknown effects.
+`linkctl raw` blocks writes to extension units 10 and 11 outright, because several of their
+selectors are write-only with unknown effects. The only writes linkctl makes there are the
+on-camera preset save and recall (unit 11, selectors 4 and 5).
 
 `linkctl raw set --force` overrides both guards. Read `UNSAFE_SELECTORS` in
 `linkctl/camera.py` before you do. Reads are never blocked — `linkctl raw dump` is safe.

@@ -194,6 +194,23 @@ def cmd_track(args, cam):
     return 0
 
 
+def _camera_preset(args, cam):
+    if args.action in ("list", "rm"):
+        return _fail("the camera does not report or delete its presets; "
+                     "save over a slot to replace it")
+    if args.slot is None:
+        return _fail(f"'preset {args.action}' needs a slot number")
+    if args.action == "save":
+        cam.save_camera_preset(args.slot)
+        print(f"saved the current framing to camera slot {args.slot}")
+    else:
+        cam.recall_camera_preset(args.slot)
+        print(f"recalled camera slot {args.slot}: pan {cam.get_pan():+.1f}° "
+              f"tilt {cam.get_tilt():+.1f}° zoom {cam.get_zoom():.2f}x")
+        _warn_if_parked(cam)
+    return 0
+
+
 def cmd_drive(args, cam):
     cam.drive(args.pan_speed, args.tilt_speed)
     try:
@@ -271,6 +288,8 @@ def cmd_set(args, cam):
 
 
 def cmd_preset(args, cam):
+    if args.camera:
+        return _camera_preset(args, cam)
     if args.action == "list":
         presets = cam.list_presets()
         if not presets:
@@ -426,6 +445,8 @@ def build_parser():
     p = sub.add_parser("preset", help="save and recall pan/tilt/zoom positions")
     p.add_argument("action", choices=["save", "go", "list", "rm"])
     p.add_argument("slot", nargs="?", type=int)
+    p.add_argument("--camera", action="store_true",
+                   help="use the presets stored in the camera (slots 1-6)")
     p.set_defaults(func=cmd_preset)
 
     p = sub.add_parser("raw", help="talk to the extension units directly")
