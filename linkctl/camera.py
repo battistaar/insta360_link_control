@@ -39,6 +39,7 @@ SEL_GESTURE_MASK = 5   # 1 byte, bitmask of enabled gesture groups
 SEL_GESTURE_BIND = 6   # 5 bytes, one action per gesture slot (firmware-owned; values
                        # other than 0, 1 and 2 are accepted but ignored)
 SEL_NOISE_CANCEL = 7   # 1 byte, microphone noise cancellation
+SEL_IDENTITY = 3       # 170 bytes; the firmware version string is at 0x61-0x6F
 SEL_SERIAL = 12        # 32 bytes, unit serial (writable -- never touch)
 SEL_SETTINGS_RESET = 14  # 1 byte: factory settings reset, applied at the next power-up
 SEL_USB_MODE = 17      # 1 byte, 0=uvc 1=photo 2=mass-storage -- drops the webcam
@@ -59,7 +60,7 @@ UNSAFE_SELECTORS = {
     SEL_SERIAL: "overwrites the unit serial number",
     SEL_SETTINGS_RESET: "resets every setting to factory defaults at the next power-up",
     1: "factory service hook",
-    3: "identity block; writes are persisted",
+    SEL_IDENTITY: "identity block; writes are persisted",
     4: "raw command channel to the gimbal controller; can miscalibrate the gimbal",
     8: "bulk transfer buffer",
     10: "switches the USB personality and restarts the camera",
@@ -114,6 +115,21 @@ FEATURE_MODELS = {
     "vflip": LINK2_FAMILY,
     "low-res": LINK2_FAMILY,
 }
+
+# Oldest firmware that has a feature, by USB product ID.
+FEATURE_MIN_FIRMWARE = {
+    "4c01": {"startup-params": (1, 1, 2, 0), "auto-track": (1, 1, 4, 0),
+             "lock-vertical": (1, 3, 1, 8)},
+}
+
+
+def firmware_tuple(version):
+    """(1, 4, 8, 8) from "v1.4.8.8_build2"; () if it cannot be parsed."""
+    numbers = version.lstrip("vV").split("_")[0].split(".")
+    try:
+        return tuple(int(n) for n in numbers)
+    except ValueError:
+        return ()
 
 ARCSEC_PER_DEGREE = 3600
 CONFIG_DIR = os.path.join(
@@ -245,6 +261,7 @@ class LinkCamera:
         self.xu_extra = units.get(XU_EXTRA_GUID)
         self._len_cache = {}
         self._last_mode = None
+        self._firmware = None
         self._gesture_backup = None
 
     def close(self):
@@ -472,8 +489,11 @@ class LinkCamera:
     def supported_features(self):
         """Names from FEATURES that this model has."""
         pid = self.info.get("pid")
+        minimums = FEATURE_MIN_FIRMWARE.get(pid, {})
+        firmware = firmware_tuple(self.firmware_version()) if minimums else ()
         return [name for name in FEATURES
-                if name not in FEATURE_MODELS or pid in FEATURE_MODELS[name]]
+                if (name not in FEATURE_MODELS or pid in FEATURE_MODELS[name])
+                and (name not in minimums or not firmware or firmware >= minimums[name])]
 
     def feature_flags(self):
         return struct.unpack_from("<H", self.xu_read(SEL_FEATURE_FLAGS), 0)[0]
@@ -545,6 +565,15 @@ class LinkCamera:
             return self.info.get("serial", "")
         raw = self.xu_read(SEL_SERIAL)
         return raw.split(b"\x00")[0].decode("ascii", "replace")
+
+    def firmware_version(self):
+        """Firmware version string such as "v1.4.8.8_build2", or "" if unavailable."""
+        if self.xu_main is None:
+            return ""
+        if self._firmware is None:
+            raw = bytes(self.xu_read(SEL_IDENTITY))[0x61:0x70]
+            self._firmware = raw.split(b"\x00")[0].decode("ascii", "replace").strip()
+        return self._firmware
 
     # ---------- image controls ----------
 
