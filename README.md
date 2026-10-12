@@ -108,9 +108,10 @@ linkctl tilt [DEGREES]           get or set tilt      (-90..+100)
 linkctl zoom [FACTOR]            get or set zoom      (1.0..4.0)
 linkctl move DPAN [DTILT]        nudge by a relative amount
 linkctl center                   pan 0, tilt 0, zoom 1x
+linkctl drive PAN [TILT]         move continuously, speed -10..10, for --seconds (default 1)
 
 linkctl mode [normal|track|whiteboard|overhead|deskview]
-linkctl track [on|off]           AI subject tracking
+linkctl track [on|off]           AI subject tracking; --speed 0-3 sets how fast it follows
 linkctl frame [head|upper|full]  how tightly tracking frames you
 linkctl gestures [on|off]        hand gesture control
 linkctl noise [on|off]           microphone noise cancellation
@@ -121,6 +122,7 @@ linkctl get CONTROL              e.g. brightness, contrast, focus
 linkctl set CONTROL VALUE
 
 linkctl preset save|go|rm SLOT   pan/tilt/zoom presets, stored on disk
+                                 --camera: slots 1-6 stored in the camera itself
 linkctl preset list
 
 linkctl raw dump                 every extension-unit selector, with lengths
@@ -152,7 +154,7 @@ linkctl exposure manual --iso 400 --shutter 100
 linkctl gui
 ```
 
-Live preview, a gimbal pad with press-and-hold repeat, zoom, six presets, the framing
+Live preview, a gimbal pad (click to step, hold to move smoothly), zoom, six presets, the framing
 modes, and every image control. Sliders whose value is currently owned by an auto mode
 (focus under autofocus, white balance under AWB) are greyed out rather than silently
 ignoring you.
@@ -232,8 +234,9 @@ which holds the serial number. Selector 14 is blocked as well: it resets every s
 its factory default the next time the camera powers up. Bulk configuration blobs are
 blocked too.
 
-Writes to extension units 10 and 11 are blocked outright, because their selectors are not
-mapped and several are write-only with unknown effects.
+`linkctl raw` blocks writes to extension units 10 and 11 outright, because several of their
+selectors are write-only with unknown effects. The only writes linkctl makes there are the
+on-camera preset save and recall (unit 11, selectors 4 and 5).
 
 `linkctl raw set --force` overrides both guards. Read `UNSAFE_SELECTORS` in
 `linkctl/camera.py` before you do. Reads are never blocked — `linkctl raw dump` is safe.
