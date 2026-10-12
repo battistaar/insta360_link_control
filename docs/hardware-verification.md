@@ -20,6 +20,30 @@ Conclusion: the `-71` "crash" is the firmware saving the portrait bit and restar
 `linkctl.camera.FEATURES` has bit 3 set, so every `feature` call turned mirroring on, and "on"/"off"
 send the same first byte.
 
+### Every flag, one at a time
+
+With video streaming, each flag was set and cleared through `linkctl feature`. The readback
+was checked each time, and the kernel log was watched for restarts.
+
+| Flag | Bit | Set → readback | Visible effect |
+|---|---|---|---|
+| ai-zoom | 0 | `0x0011` | not checked |
+| hdr | 2 | `0x0014` | not checked |
+| flip | 3 | `0x0018` | image mirrored |
+| gesture-control | 4 | cleared → `0x0000` | not checked |
+| startup-params | 6 | `0x0050` | not checked |
+| tap-track | 7 | `0x0090` | not checked |
+| auto-track | 8 | `0x0110` | does not start subject tracking |
+| smart-adjust | 9 | `0x0210` | not checked |
+| lock-vertical | 10 | `0x0410` | none observed |
+| privacy | 11 | unchanged `0x0010` | write ignored |
+| vflip | 12 | unchanged `0x0010` | write ignored |
+
+None of these restarted the camera. Setting portrait (bit 5) restarted it. The camera then offered
+1080×1920, 1088×1920 and 736×1280, and a 1080×1920 capture was a correctly oriented portrait
+image. Clearing bit 5 restarted it again, back to landscape formats. The other flags were kept
+both times.
+
 ## Selector 26 order
 
 Read while the gimbal was parked: `(-277200, 21960)` arcseconds = (−77°, +6.1°). The parked

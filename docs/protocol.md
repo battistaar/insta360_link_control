@@ -50,29 +50,31 @@ power cycles.
 
 | Bit | Feature | Verified |
 |---|---|---|
-| 0 | AI zoom | no |
+| 0 | AI zoom | stored |
 | 1 | unused | – |
-| 2 | HDR | no |
+| 2 | HDR | stored |
 | 3 | Horizontal mirror | yes |
 | 4 | Gestures (master switch) | yes (set by reset) |
 | 5 | Portrait resolutions (9:16 formats). **Changing it restarts the camera.** | yes |
-| 6 | Save current parameters as startup parameters | no |
+| 6 | Save current parameters as startup parameters | stored |
 | 7 | Single-tap tracking | yes (set by reset) |
-| 8 | Auto tracking | yes (set by reset) |
-| 9 | Smart adjustment | no |
-| 10 | Lock the gimbal in vertical orientation (Link 1) | no |
-| 11 | Privacy: gimbal points down | no |
-| 12 | Vertical flip | no |
+| 8 | Auto tracking. Does not start subject tracking by itself (use mode 1). | stored |
+| 9 | Smart adjustment | stored |
+| 10 | Lock the gimbal in vertical orientation (Link 1). No visible effect observed. | stored |
+| 11 | Privacy: gimbal points down. Ignored by the Link 1. | yes (Link 1 ignores) |
+| 12 | Vertical flip. Ignored by the Link 1. | yes (Link 1 ignores) |
 | 13 | Low-resolution mode. **Changing it restarts the camera** (not on Link 1). | no |
 | 14 | Pause-tracking area | no |
 | 15 | Audio volume | no |
 
-After a factory reset the value is `0x0190` (bits 4, 7, 8).
+"Stored" means the bit can be set and cleared and reads back, without restarting the camera,
+but its effect has not been confirmed. After a factory reset the value is `0x0190`
+(bits 4, 7, 8).
 
 When bit 5 changes, the camera saves the setting and restarts. The `SET_CUR` request fails with
 `EPROTO` (`-71`) and the device re-enumerates about 6 s later. That is expected behaviour, not a
 crash. With bit 5 set, the camera adds 1080×1920, 1088×1920 and 736×1280 formats. Streaming one of
-them puts the image in portrait.
+them gives a correctly oriented portrait image; landscape formats are not offered while it is set.
 
 ### Selector 2: mode record
 
