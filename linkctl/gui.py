@@ -373,6 +373,7 @@ class ControlPanel(ttk.Frame):
             ("Node", self.cam.node),
             ("USB", f"{self.cam.info.get('vid','')}:{self.cam.info.get('pid','')}"),
             ("Serial", self.cam.serial_number() if self.cam.has_extension_unit else "-"),
+            ("Firmware", self.cam.firmware_version() or "-"),
             ("Ext units", ", ".join(str(u) for u in sorted(set(self.cam.units.values()))) or "none"),
         ]
         for index, (key, value) in enumerate(details):

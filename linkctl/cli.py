@@ -51,6 +51,7 @@ def cmd_info(args, cam):
     print(f"Model       {cam.info.get('model')}  [{cam.info.get('vid')}:{cam.info.get('pid')}]")
     print(f"Card        {cam.info.get('card','').strip()}")
     print(f"Serial      {cam.serial_number()}")
+    print(f"Firmware    {cam.firmware_version() or 'unknown'}")
     if cam.units:
         units = ", ".join(f"{uid} ({guid[:8]}…)" for guid, uid in sorted(cam.units.items(), key=lambda kv: kv[1]))
         print(f"Ext units   {units}")
